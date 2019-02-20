@@ -1,23 +1,29 @@
 import Vapor
 
-/// Controls basic CRUD operations on `Todo`s.
-final class TodoController {
-    /// Returns a list of all `Todo`s.
-    func index(_ req: Request) throws -> Future<[Todo]> {
-        return Todo.query(on: req).all()
+struct TodoController: RouteCollection {
+    
+    func boot(router: Router) throws {
+        let todosRouter = router.grouped("todos").grouped(UserIdMiddleware())
+    
+        todosRouter.post(CreateTodoRequest.self, at: "", use: createTodo)
+        todosRouter.get("", use: getTodos)
     }
+}
 
-    /// Saves a decoded `Todo` to the database.
-    func create(_ req: Request) throws -> Future<Todo> {
-        return try req.content.decode(Todo.self).flatMap { todo in
-            return todo.save(on: req)
+private extension TodoController {
+    
+    func createTodo(_ req: Request, createRequest: CreateTodoRequest) throws -> Future<HTTPStatus> {
+        let userId = try req.requireUserId()
+        let todo = Todo(userId: userId, title: createRequest.title, description: createRequest.description)
+        let repository = try req.make(TodoRepository.self)
+        return repository.store(todo: todo, on: req).transform(to: .created)
+    }
+    
+    func getTodos(_ req: Request) throws -> Future<[TodoResponse]> {
+        let userId = try req.requireUserId()
+        let repository = try req.make(TodoRepository.self)
+        return repository.findAll(userId: userId, on: req).map { todos in
+            return todos.compactMap { TodoResponse(todo: $0.0, user: $0.1) }
         }
-    }
-
-    /// Deletes a parameterized `Todo`.
-    func delete(_ req: Request) throws -> Future<HTTPStatus> {
-        return try req.parameters.next(Todo.self).flatMap { todo in
-            return todo.delete(on: req)
-        }.transform(to: .ok)
     }
 }
